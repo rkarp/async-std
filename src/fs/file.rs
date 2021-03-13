@@ -504,11 +504,13 @@ impl<T> Lock<T> {
     fn poll_lock(&self, cx: &mut Context<'_>) -> Poll<LockGuard<T>> {
         // Try acquiring the lock.
         if self.0.locked.swap(true, Ordering::Acquire) {
+            dbg!("lock failed outer");
             // Lock the list of wakers.
             let mut list = self.0.wakers.lock().unwrap();
 
             // Try acquiring the lock again.
             if self.0.locked.swap(true, Ordering::Acquire) {
+                dbg!("lock failed inner");
                 // If failed again, add the current task to the list and return.
                 if list.iter().all(|w| !w.will_wake(cx.waker())) {
                     list.push(cx.waker().clone());
@@ -517,6 +519,7 @@ impl<T> Lock<T> {
             }
         }
 
+        dbg!("lock successful");
         // The lock was successfully acquired.
         Poll::Ready(LockGuard(self.0.clone()))
     }
@@ -548,8 +551,11 @@ impl<T> Drop for LockGuard<T> {
         // Release the lock.
         self.0.locked.store(false, Ordering::Release);
 
+        dbg!("dropping guard");
+
         // Wake up all registered tasks interested in acquiring the lock.
         for w in self.0.wakers.lock().unwrap().drain(..) {
+            dbg!("in dropping guard: waking 1 task");
             w.wake();
         }
     }
@@ -572,6 +578,7 @@ impl<T> DerefMut for LockGuard<T> {
 /// Modes a file can be in.
 ///
 /// The file can either be in idle mode, reading mode, or writing mode.
+#[derive(Debug)]
 enum Mode {
     /// The cache is empty.
     Idle,
@@ -766,6 +773,7 @@ impl LockGuard<State> {
 
     /// Writes some data from a buffer into the file.
     fn poll_write(mut self, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+        dbg!(std::str::from_utf8(buf).unwrap());
         // If an async operation has left a write error, return it now.
         if let Some(err) = self.last_write_err.take() {
             return Poll::Ready(Err(err));
@@ -786,6 +794,7 @@ impl LockGuard<State> {
         // If there is space available in the cache or if the buffer is empty, we can write data
         // into the cache.
         if available > 0 || buf.is_empty() {
+            dbg!(available, buf.len());
             let n = cmp::min(available, buf.len());
             let start = self.cache.len();
 
@@ -800,6 +809,7 @@ impl LockGuard<State> {
             self.mode = Mode::Writing;
             Poll::Ready(Ok(n))
         } else {
+            dbg!(available);
             // Drain the write cache because it's full.
             futures_core::ready!(self.poll_drain(cx))?;
             Poll::Pending
@@ -813,6 +823,7 @@ impl LockGuard<State> {
             return Poll::Ready(Err(err));
         }
 
+        dbg!(&self.mode);
         match self.mode {
             Mode::Idle | Mode::Reading(..) => Poll::Ready(Ok(self)),
             Mode::Writing => {
@@ -821,6 +832,7 @@ impl LockGuard<State> {
 
                 // Start a write operation asynchronously.
                 spawn_blocking(move || {
+                    dbg!("blocking task: writing");
                     match (&*self.file).write_all(&self.cache) {
                         Ok(_) => {
                             // Switch to idle mode.
@@ -841,6 +853,7 @@ impl LockGuard<State> {
 
     /// Flushes the write cache into the file.
     fn poll_flush(mut self, cx: &mut Context<'_>) -> Poll<io::Result<Self>> {
+        dbg!(self.is_flushed);
         // If the file is already in flushed state, return.
         if self.is_flushed {
             return Poll::Ready(Ok(self));

@@ -46,6 +46,7 @@ impl<T: Write + Unpin + ?Sized> Future for WriteFmtFuture<'_, T> {
                 return Poll::Ready(Err(io::ErrorKind::WriteZero.into()));
             }
             *amt += i as u64;
+            dbg!(*amt);
         }
     }
 }
