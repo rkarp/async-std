@@ -322,3 +322,162 @@ extension_trait! {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::io::write::WriteExt;
+    use crate::task::{Context, Poll};
+    use std::pin::Pin;
+
+    use futures::Future;
+    use futures_io::{Error, ErrorKind};
+    
+    struct PartialWriter {
+        expected: Vec<u8>,
+    }
+    impl Write for PartialWriter {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            let write_len = usize::max(1, self.expected.len() / 2);
+
+            let first = &self.expected[..write_len];
+
+            if *first != buf[..write_len] {
+                Poll::Ready(Err(Error::new(ErrorKind::Other, "unexpected contents")))
+            } else {
+                self.expected = self.expected[write_len..].to_owned();
+                Poll::Ready(Ok( write_len ))
+            }
+        }
+    
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    
+        fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+/* 
+there is no way (we found) to declare this without either getting 
+E0597 -- borrowed value does not live long enough    https://doc.rust-lang.org/error-index.html#E0597
+or
+E0521 -- Borrowed data escapes outside of closure.   https://doc.rust-lang.org/error-index.html#E0521
+
+or a bunch of other problems
+*/
+
+/* E0597: * /
+    async fn run_partial_write_test<'a, F, RF>(write_fn: F) -> std::io::Result<()> 
+    where
+        F: Fn(&'a mut PartialWriter, &str) -> RF,
+        RF: Future<Output = crate::io::Result<()>> + 'a,
+    {
+        let content = "a12345678a";
+
+        let mut partial_writer = PartialWriter{ expected: content.as_bytes().to_owned() };
+
+
+        (write_fn)(&mut partial_writer, content).await?;
+
+        if partial_writer.expected.len() > 0 {
+            Err(Error::new(ErrorKind::Other, "expected content not written"))
+        } else {
+            Ok(())
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_partial_write_fmt_2() -> std::io::Result<()> {
+        fn write_fn<'a,>(pw: &'a mut PartialWriter, content: &str) -> WriteFmtFuture<'a, &'a mut PartialWriter> {
+            write!(&mut pw, "{}", content)
+        }
+
+        let x = run_partial_write_test(&write_fn);
+        crate::task::block_on(x)
+    }
+/ **/
+
+/* E0521: * /
+    async fn run_partial_write_test<RF>(write_fn: fn(&'a mut PartialWriter, &str) -> RF) -> std::io::Result<()> 
+    where
+        RF: Future<Output = crate::io::Result<()>> + 'a,
+    {
+        let content = "a12345678a";
+
+        let mut partial_writer = PartialWriter{ expected: content.as_bytes().to_owned() };
+
+
+        (write_fn)(&mut partial_writer, content).await?;
+
+        if partial_writer.expected.len() > 0 {
+            Err(Error::new(ErrorKind::Other, "expected content not written"))
+        } else {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_partial_write_fmt_2() -> std::io::Result<()> {
+        fn write_fn<'a,>(pw: &'a mut PartialWriter, content: &str) -> WriteFmtFuture<'a, &'a mut PartialWriter> {
+            write!(&mut pw, "{}", content)
+        }
+
+        let x = run_partial_write_test(write_fn);
+        crate::task::block_on(x)
+    }
+/ **/
+
+
+ #[test]
+    fn test_partial_write_fmt() -> std::io::Result<()> {
+        async fn run<'a>() -> std::io::Result<()> {
+            let a = "a12345678a";
+
+            let mut partial_writer: PartialWriter = PartialWriter{ expected: a.as_bytes().to_owned() };
+    
+            let x = write!(
+                &mut partial_writer, 
+                "{}",
+                a, 
+            );
+
+            x.await?;
+
+            if partial_writer.expected.len() > 0 {
+                Err(Error::new(ErrorKind::Other, "expected content not written"))
+            } else {
+                Ok(())
+            }
+        }
+
+        crate::task::block_on(run())
+    }
+    #[test]
+    fn test_partial_write() -> std::io::Result<()> {
+        async fn run() -> std::io::Result<()> {
+            let a = "a12345678a";
+
+            let mut partial_writer = PartialWriter{ expected: a.as_bytes().to_owned() };
+    
+            partial_writer.write_all(a.as_bytes()).await?;
+
+            if partial_writer.expected.len() > 0 {
+                Err(Error::new(ErrorKind::Other, "expected content not written"))
+            } else {
+                Ok(())
+            }
+        }
+
+        crate::task::block_on(run())
+    }
+}
