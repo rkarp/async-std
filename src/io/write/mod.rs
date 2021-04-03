@@ -407,16 +407,15 @@ or a bunch of other problems
     }
 / **/
 
-    fn run_partial_write_test<RF>(write_fn: for<'a> fn(&'a mut PartialWriter, &str) -> RF) -> std::io::Result<()>
+    fn run_partial_write_test<F>(write_fn: F) -> std::io::Result<()>
     where
-        RF: Future<Output = crate::io::Result<()>> + 'a, // can't reference this here since RF is declared by caller
+        F: for<'a> Fn(&'a mut PartialWriter, &str) -> crate::io::Result<()>,
     {
         let content = "a12345678a";
 
         let mut partial_writer = PartialWriter{ expected: content.as_bytes().to_owned() };
 
-
-        crate::task::block_on(write_fn(&mut partial_writer, content))?;
+        write_fn(&mut partial_writer, content)?;
 
         if partial_writer.expected.len() > 0 {
             Err(Error::new(ErrorKind::Other, "expected content not written"))
@@ -427,15 +426,15 @@ or a bunch of other problems
 
     #[test]
     fn test_partial_write_fmt_2() -> std::io::Result<()> {
-        fn write_fn<'a>(pw: &'a mut PartialWriter, content: &str) -> WriteFmtFuture<'a, &'a mut PartialWriter> {
-            (&mut pw).write_fmt(format_args!("{}", content))
+        fn write_fn(pw: &mut PartialWriter, content: &str) -> crate::io::Result<()> {
+            crate::task::block_on(pw.write_fmt(format_args!("{}", content)))
         }
 
         run_partial_write_test(write_fn)
     }
 
 
- #[test]
+    #[test]
     fn test_partial_write_fmt() -> std::io::Result<()> {
         async fn run<'a>() -> std::io::Result<()> {
             let a = "a12345678a";
