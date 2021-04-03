@@ -407,9 +407,9 @@ or a bunch of other problems
     }
 / **/
 
-    fn run_partial_write_test<'a, RF>(write_fn: fn(&'a mut PartialWriter, &str) -> RF) -> std::io::Result<()>
+    fn run_partial_write_test<RF>(write_fn: for<'a> fn(&'a mut PartialWriter, &str) -> RF) -> std::io::Result<()>
     where
-        RF: Future<Output = crate::io::Result<()>> + 'a,
+        RF: Future<Output = crate::io::Result<()>> + 'a, // can't reference this here since RF is declared by caller
     {
         let content = "a12345678a";
 
